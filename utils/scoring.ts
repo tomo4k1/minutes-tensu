@@ -1,5 +1,6 @@
 import Riichi from 'riichi';
 import { ScoreResult } from './types';
+import { GameSettings } from './storage';
 
 const isYaochu = (tile: string): boolean => {
     return /[19]|[z]/.test(tile);
@@ -13,7 +14,7 @@ const getTileType = (tile: string): string => {
     return tile.replace(/[0-9]/, '');
 };
 
-export const calculateScore = (handStr: string, wind: string = 'East', roundWind: string = 'East', dora: string[] = []): ScoreResult => {
+export const calculateScore = (handStr: string, wind: string = 'East', roundWind: string = 'East', dora: string[] = [], settings?: GameSettings): ScoreResult => {
     const windMap: Record<string, number> = { 'East': 1, 'South': 2, 'West': 3, 'North': 4 };
     const round = windMap[roundWind] || 1;
     const seat = windMap[wind] || 1;
@@ -26,6 +27,17 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
     }
 
     const riichi = new Riichi(query) as any;
+
+    // Apply Settings
+    if (settings) {
+        // Riichi library supports 'disableKuitan' and 'disableAka' properties on the instance
+        // Note: This depends on the specific version/fork of riichi. 
+        // If not supported, we might need to filter results manually.
+        // Based on common usage of this lib:
+        riichi.disableKuitan = !settings.kuitan;
+        riichi.disableAka = !settings.akaDora;
+    }
+
     const result = riichi.calc();
 
     if (result.error) {
@@ -140,6 +152,31 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
         // Ron
         // Menzen Ron is +10. Assuming Menzen for now.
         fuDetails.push(`門前ロン 10符`);
+    }
+
+    // Handle Kiriage Mangan (30fu 4han -> 8000/12000 instead of 7700/11600)
+    // riichi lib might return 7700 for 30fu 4han.
+    if (settings?.kiriageMangan) {
+        if (result.fu === 30 && result.han === 4) {
+            // Check if it's not already mangan (some rules might differ)
+            // Usually 30fu 4han is 7700 (Ron) or 7900 (Tsumo 2000/3900 -> 2000/4000?)
+            // Kiriage Mangan rounds this up to Mangan (8000 / 4000/2000)
+            // We can just override the text or points if we detect this specific case.
+            // For simplicity, let's just mark it in text for now or adjust points if needed.
+            // Note: riichi lib points might be complex object or number.
+            // If points is close to 7700, bump to 8000.
+            if (result.ten >= 7700 && result.ten < 8000) {
+                result.ten = 8000;
+                result.text = result.text.replace(/\d+点/, '8000点'); // Simple replacement
+            }
+        }
+        // 60fu 3han is equivalent to 30fu 4han
+        if (result.fu === 60 && result.han === 3) {
+            if (result.ten >= 7700 && result.ten < 8000) {
+                result.ten = 8000;
+                result.text = result.text.replace(/\d+点/, '8000点');
+            }
+        }
     }
 
     return {

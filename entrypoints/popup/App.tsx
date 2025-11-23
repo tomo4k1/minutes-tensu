@@ -5,11 +5,13 @@ import ScoreInput from '@/components/ScoreInput';
 import ResultView from '@/components/ResultView';
 import { generateRandomHand } from '@/utils/generator';
 import type { MahjongHand, ScoreResult } from '@/utils/types';
+import { settingsStorage, defaultSettings, GameSettings } from '@/utils/storage';
 
 function App() {
   const [hand, setHand] = useState<MahjongHand | null>(null);
   const [userResult, setUserResult] = useState<{ han: number; fu: number; points: number } | null>(null);
   const [actualResult, setActualResult] = useState<ScoreResult | null>(null);
+  const [settings, setSettings] = useState<GameSettings>(defaultSettings);
 
   const loadNewHand = () => {
     const newHand = generateRandomHand();
@@ -19,7 +21,23 @@ function App() {
   };
 
   useEffect(() => {
-    loadNewHand();
+    const init = async () => {
+      try {
+        console.log('Starting init...');
+        console.log('Loading settings...');
+        const s = await settingsStorage.getValue();
+        console.log('Settings loaded:', s);
+        setSettings(s);
+      } catch (e) {
+        console.error('Failed to load settings:', e);
+        // Fallback to default settings if storage fails
+        setSettings(defaultSettings);
+      } finally {
+        console.log('Loading new hand...');
+        loadNewHand();
+      }
+    };
+    init();
   }, []);
 
   const handleSubmit = async (han: number, fu: number, points: number) => {
@@ -27,7 +45,7 @@ function App() {
     try {
       // Lazy load scoring logic to improve startup time
       const { calculateScore } = await import('@/utils/scoring');
-      const result = calculateScore(hand.tiles, hand.wind, hand.roundWind, hand.dora);
+      const result = calculateScore(hand.tiles, hand.wind, hand.roundWind, hand.dora, settings);
       setActualResult(result);
       setUserResult({ han, fu, points });
     } catch (e: any) {
@@ -40,13 +58,21 @@ function App() {
 
   return (
     <div className="w-[400px] min-h-[600px] bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-6 font-sans text-gray-800">
-      <header className="mb-6 text-center">
+      <header className="mb-6 text-center relative">
         <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-purple-600 drop-shadow-sm">
           🀄 Tensu Gal 🀄
         </h1>
         <p className="text-sm text-gray-500 font-medium mt-1">
           Let's practice scoring! ✨
         </p>
+        <a
+          href="/options.html"
+          target="_blank"
+          className="absolute top-1 right-0 text-2xl hover:scale-110 transition-transform cursor-pointer"
+          title="Settings"
+        >
+          ⚙️
+        </a>
       </header>
 
       <main className="space-y-8">
