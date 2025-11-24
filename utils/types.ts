@@ -3,6 +3,9 @@ export interface MahjongHand {
     dora?: string[];
     wind?: 'East' | 'South' | 'West' | 'North';
     roundWind?: 'East' | 'South';
+    isTsumo?: boolean;
+    isRiichi?: boolean;
+    calls?: string[]; // Array of called sets, e.g. ['123m', '444p']
 }
 
 export interface ScoreResult {

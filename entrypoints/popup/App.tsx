@@ -13,8 +13,27 @@ function App() {
   const [actualResult, setActualResult] = useState<ScoreResult | null>(null);
   const [settings, setSettings] = useState<GameSettings>(defaultSettings);
 
-  const loadNewHand = () => {
-    const newHand = generateRandomHand();
+  const loadNewHand = async () => {
+    const newHand = generateRandomHand(settings);
+
+    // If Ron, verify it has Yaku. If not, force Tsumo.
+    // If Ron, verify it has Yaku. If not, force Tsumo.
+    if (!newHand.isTsumo) {
+      try {
+        const { calculateScore } = await import('@/utils/scoring');
+        const result = calculateScore(newHand.tiles, newHand.wind, newHand.roundWind, newHand.dora, settings, false, newHand.isRiichi);
+
+        // Check if there are any Yaku EXCLUDING Dora/Red Dora/Ura Dora
+        const yakuKeys = Object.keys(result.yaku);
+        const validYaku = yakuKeys.filter(y => !['ドラ', '赤ドラ', '裏ドラ'].includes(y));
+
+        if (validYaku.length === 0) throw new Error('No Yaku (only Dora)');
+      } catch (e) {
+        console.log('Ron invalid (No Yaku), forcing Tsumo');
+        newHand.isTsumo = true;
+      }
+    }
+
     setHand(newHand);
     setUserResult(null);
     setActualResult(null);
@@ -45,7 +64,7 @@ function App() {
     try {
       // Lazy load scoring logic to improve startup time
       const { calculateScore } = await import('@/utils/scoring');
-      const result = calculateScore(hand.tiles, hand.wind, hand.roundWind, hand.dora, settings);
+      const result = calculateScore(hand.tiles, hand.wind, hand.roundWind, hand.dora, settings, hand.isTsumo, hand.isRiichi);
       setActualResult(result);
       setUserResult({ han, fu, points });
     } catch (e: any) {
@@ -92,7 +111,7 @@ function App() {
       </main>
 
       <footer className="mt-8 text-center text-xs text-gray-400">
-        Powered by WXT & Riichi 💖
+        Powered by WXT & Riichi 💖 v1.2
       </footer>
     </div>
   );

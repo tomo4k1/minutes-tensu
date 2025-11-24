@@ -1,4 +1,5 @@
 import { MahjongHand } from './types';
+import { GameSettings } from './storage';
 
 // Tile types
 const SUITS = ['m', 'p', 's'];
@@ -42,7 +43,7 @@ class Deck {
     }
 }
 
-export const generateRandomHand = (): MahjongHand => {
+export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
     const deck = new Deck();
     const handTiles: string[] = [];
 
@@ -118,6 +119,23 @@ export const generateRandomHand = (): MahjongHand => {
     // Append winTile to the end
     const finalTiles = [...remainingTiles, winTile];
 
+    // Handle Red Dora (Aka Dora)
+    // If enabled, replace '5' with '0' with some probability (e.g. 25% per 5)
+    // Actually, usually there is only 1 red 5 per suit (2 for 5p sometimes).
+    // Let's simplify: if akaDora is on, try to make one 5 red per suit if present.
+    if (settings?.akaDora) {
+        const suits = ['m', 'p', 's'];
+        suits.forEach(suit => {
+            // Find all 5s of this suit
+            const indices = finalTiles.map((t, i) => t === `5${suit}` ? i : -1).filter(i => i !== -1);
+            if (indices.length > 0) {
+                // Pick one to be red
+                const targetIndex = indices[randomInt(indices.length)];
+                finalTiles[targetIndex] = `0${suit}`;
+            }
+        });
+    }
+
     // Compress to string (e.g. 1m2m3m -> 123m)
     let resultStr = '';
     let currentSuit = '';
@@ -142,6 +160,14 @@ export const generateRandomHand = (): MahjongHand => {
     // 4. Randomize Conditions
     const winds = ['East', 'South', 'West', 'North'] as const;
     const roundWinds = ['East', 'South'] as const;
+    const isTsumo = Math.random() > 0.5;
+
+    // Riichi Logic
+    // 50% chance to be Riichi (for testing visibility)
+    // We will implement Open Hands (Naki) properly later.
+    // For now, all hands are Closed.
+    const isRiichi = Math.random() < 0.5;
+    const calls: string[] = [];
 
     // Random Dora (1 indicator)
     const allTiles = [];
@@ -154,5 +180,8 @@ export const generateRandomHand = (): MahjongHand => {
         dora: [doraIndicator],
         wind: winds[randomInt(4)],
         roundWind: roundWinds[randomInt(2)],
+        isTsumo: isTsumo,
+        isRiichi: isRiichi,
+        calls: calls
     };
 };

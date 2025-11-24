@@ -34,7 +34,20 @@ const ResultView: React.FC<ResultViewProps> = ({ userResult, actualResult, onNex
                     </div>
                     <div className="bg-pink-50 p-2 rounded-lg border border-pink-100">
                         <div className="text-xs text-pink-400 font-bold uppercase">Points</div>
-                        <div className="font-black text-xl text-gray-800">{actualResult.points}</div>
+                        <div className="font-black text-xl text-gray-800">
+                            {(() => {
+                                // Try to extract Tsumo breakdown from text
+                                const tsumoMatch = actualResult.text.match(/(\d+)\/(\d+)/);
+                                if (tsumoMatch) {
+                                    return <span className="text-lg">{tsumoMatch[1]}-{tsumoMatch[2]}</span>;
+                                }
+                                const oyaTsumoMatch = actualResult.text.match(/(\d+) all/i);
+                                if (oyaTsumoMatch) {
+                                    return <span className="text-lg">{oyaTsumoMatch[1]} all</span>;
+                                }
+                                return actualResult.points;
+                            })()}
+                        </div>
                     </div>
                 </div>
             </div>

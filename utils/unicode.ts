@@ -35,3 +35,53 @@ export const handToUnicode = (handStr: string): string => {
     }
     return result;
 };
+
+export interface TileObject {
+    char: string;
+    isRed: boolean;
+}
+
+export const handToTileObjects = (handStr: string): TileObject[] => {
+    const map: Record<string, number> = {
+        m: 0x1F007,
+        p: 0x1F019,
+        s: 0x1F010,
+        z: 0x1F000,
+    };
+
+    const result: TileObject[] = [];
+    let buffer: number[] = [];
+
+    for (const char of handStr) {
+        if (/[0-9]/.test(char)) {
+            buffer.push(parseInt(char));
+        } else if (['m', 'p', 's', 'z'].includes(char)) {
+            const base = map[char];
+            for (const num of buffer) {
+                let codePoint = 0;
+                let isRed = false;
+                let effectiveNum = num;
+
+                if (num === 0) {
+                    isRed = true;
+                    effectiveNum = 5;
+                }
+
+                if (char === 'z') {
+                    if (effectiveNum === 5) codePoint = 0x1F006; // White
+                    else if (effectiveNum === 6) codePoint = 0x1F005; // Green
+                    else if (effectiveNum === 7) codePoint = 0x1F004; // Red
+                    else codePoint = base + (effectiveNum - 1);
+                } else {
+                    codePoint = base + (effectiveNum - 1);
+                }
+                result.push({
+                    char: String.fromCodePoint(codePoint),
+                    isRed
+                });
+            }
+            buffer = [];
+        }
+    }
+    return result;
+};

@@ -14,26 +14,114 @@ const getTileType = (tile: string): string => {
     return tile.replace(/[0-9]/, '');
 };
 
-export const calculateScore = (handStr: string, wind: string = 'East', roundWind: string = 'East', dora: string[] = [], settings?: GameSettings): ScoreResult => {
+// Helper to parse hand string into tile counts
+const parseHand = (handStr: string): Record<string, number> => {
+    const counts: Record<string, number> = {};
+    const matches = handStr.match(/[0-9]+[mpsz]/g);
+    if (matches) {
+        matches.forEach(group => {
+            const type = group.slice(-1);
+            const nums = group.slice(0, -1);
+            for (const num of nums) {
+                const tile = `${num}${type}`;
+                counts[tile] = (counts[tile] || 0) + 1;
+            }
+        });
+    }
+    return counts;
+};
+
+// Helper to check if a tile can form a sequence with neighbors in the hand
+const canFormSequence = (tile: string, counts: Record<string, number>): boolean => {
+    const num = getTileNumber(tile);
+    const type = getTileType(tile);
+    if (type === 'z') return false; // Honors cannot form sequence
+
+    // Check for neighbors
+    // 1. (n-2, n-1) + n
+    if (counts[`${num - 2}${type}`] > 0 && counts[`${num - 1}${type}`] > 0) return true;
+    // 2. (n-1, n+1) + n
+    if (counts[`${num - 1}${type}`] > 0 && counts[`${num + 1}${type}`] > 0) return true;
+    // 3. (n+1, n+2) + n
+    if (counts[`${num + 1}${type}`] > 0 && counts[`${num + 2}${type}`] > 0) return true;
+
+    return false;
+};
+
+export const calculateScore = (handStr: string, wind: string = 'East', roundWind: string = 'East', dora: string[] = [], settings?: GameSettings, isTsumo: boolean = false, isRiichi: boolean = false): ScoreResult => {
     const windMap: Record<string, number> = { 'East': 1, 'South': 2, 'West': 3, 'North': 4 };
     const round = windMap[roundWind] || 1;
     const seat = windMap[wind] || 1;
 
-    let query = `${handStr}+${round}${seat}`;
+    // Determine winning tile (last tile in string)
+    const tilesMatch = handStr.match(/[0-9]+[mpsz]/g);
+    let winTile = '';
+    if (tilesMatch) {
+        const lastGroup = tilesMatch[tilesMatch.length - 1];
+        const type = lastGroup.slice(-1);
+        const nums = lastGroup.slice(0, -1);
+        winTile = nums.slice(-1) + type;
+    }
+
+    // Smart Format Selection
+    let query = '';
+
+    if (!isTsumo && winTile) {
+        const counts = parseHand(handStr);
+        const winTileCount = counts[winTile] || 0;
+        const formsTriplet = winTileCount >= 3;
+        const formsSequence = canFormSequence(winTile, counts);
+
+        // If it forms a Triplet AND CANNOT form a Sequence, use Separated Format to enforce Open Triplet
+        // This fixes "Sanankou on Ron" (Shanpon wait)
+        if (formsTriplet && !formsSequence) {
+            // Construct Separated Format: handWithoutWinTile + '+' + winTile
+            // We need to remove ONE instance of winTile from handStr
+            // This is tricky with compressed string.
+            // Reconstruct string from counts
+            let newHandStr = '';
+            const suits = ['m', 'p', 's', 'z'];
+            suits.forEach(s => {
+                let nums = '';
+                for (let i = 1; i <= 9; i++) {
+                    const t = `${i}${s}`;
+                    let count = counts[t] || 0;
+                    if (t === winTile) count--; // Remove one winTile
+                    for (let j = 0; j < count; j++) nums += i;
+                }
+                if (nums) newHandStr += nums + s;
+            });
+            query = `${newHandStr}+${winTile}+${round}${seat}`;
+        } else {
+            // Use Compressed Format (default)
+            // Preserves Pinfu (Sequence) and Tanki (Pair)
+            query = `${handStr}+${round}${seat}`;
+        }
+    } else {
+        // Tsumo or no winTile found
+        query = `${handStr}+${round}${seat}`;
+    }
+
     if (dora && dora.length > 0) {
         dora.forEach(d => {
             query += `+d${d}`;
         });
     }
 
+    if (isTsumo) {
+        query += '+tsumo';
+    } else {
+        query += '+ron'; // Explicitly add ron, though we handle adjustments manually too
+    }
+
+    if (isRiichi) {
+        query += '+riichi';
+    }
+
     const riichi = new Riichi(query) as any;
 
     // Apply Settings
     if (settings) {
-        // Riichi library supports 'disableKuitan' and 'disableAka' properties on the instance
-        // Note: This depends on the specific version/fork of riichi. 
-        // If not supported, we might need to filter results manually.
-        // Based on common usage of this lib:
         riichi.disableKuitan = !settings.kuitan;
         riichi.disableAka = !settings.akaDora;
     }
@@ -47,16 +135,6 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
     // Calculate Fu Details
     const fuDetails: string[] = ['副底 20符']; // Base is always 20
     const pattern = riichi.currentPattern;
-
-    // Determine winning tile (last tile in string)
-    const tilesMatch = handStr.match(/[0-9]+[mpsz]/g);
-    let winTile = '';
-    if (tilesMatch) {
-        const lastGroup = tilesMatch[tilesMatch.length - 1];
-        const type = lastGroup.slice(-1);
-        const nums = lastGroup.slice(0, -1);
-        winTile = nums.slice(-1) + type;
-    }
 
     // 1. Mentsu & Head Fu
     if (pattern) {
@@ -140,37 +218,110 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
         }
     }
 
+    // Filter out situational Yaku that are not supported yet (Ippatsu, Haitei, etc.)
+    const situationalYaku = ['一発', '海底摸月', '河底撈魚', '嶺上開花', '槍槓', '天和', '地和', 'ダブル立直', '裏ドラ'];
+
+    // Also filter out Riichi if we didn't explicitly enable it (library sometimes adds it automatically)
+    if (!isRiichi) {
+        situationalYaku.push('立直');
+    }
+
+    let hanChanged = false;
+    situationalYaku.forEach(y => {
+        if (result.yaku[y]) {
+            const hanValue = parseInt(result.yaku[y].replace('飜', '').replace('役満', '13')); // Handle Yakuman value if needed, though rare
+            if (!isNaN(hanValue)) {
+                result.han -= hanValue;
+                hanChanged = true;
+            } else if (result.yaku[y].includes('役満')) {
+                // If it was Yakuman, we might have issues if it was the ONLY Yakuman.
+                // But for now, let's just remove it.
+                // Re-check Yakuman status later.
+            }
+            delete result.yaku[y];
+        }
+    });
+
     // 3. Win Type Fu
     const isPinfu = result.yaku && Object.keys(result.yaku).some(y => y.includes('平和'));
-    const isTsumo = result.text.includes('自摸') || result.text.includes('Tsumo');
+    // Check if riichi included Tsumo yaku
+    const hasMenzenTsumo = result.yaku && result.yaku['門前清自摸和'];
+    // Check for Yakuman
+    const yakumanList = result.yaku ? Object.entries(result.yaku).filter(([k, v]) => (v as string).includes('役満')) : [];
+    const isYakuman = yakumanList.length > 0;
 
     if (isTsumo) {
-        if (!isPinfu) {
+        if (!isPinfu && !isYakuman) {
             fuDetails.push(`ツモ 2符`);
         }
     } else {
         // Ron
-        // Menzen Ron is +10. Assuming Menzen for now.
-        fuDetails.push(`門前ロン 10符`);
+        // If riichi calculated as Tsumo (Menzen Tsumo present OR Yakuman with Tsumo text), we need to adjust
+        const riichiSaysTsumo = result.text.includes('自摸') || result.text.includes('Tsumo');
+
+        if (hasMenzenTsumo || (isYakuman && riichiSaysTsumo)) {
+            if (hasMenzenTsumo) {
+                // Remove Menzen Tsumo
+                delete result.yaku['門前清自摸和'];
+                result.han -= 1;
+                hanChanged = true;
+            }
+
+            // Adjust Fu (Only if not Yakuman, as Yakuman ignores Fu)
+            if (!isYakuman) {
+                const isChiitoitsu = Object.keys(result.yaku).some(y => y.includes('七対子'));
+
+                if (!isChiitoitsu) {
+                    // Parse fuDetails to get total
+                    let rawFu = 20; // Base
+                    fuDetails.forEach(d => {
+                        const m = d.match(/(\d+)符/);
+                        if (m && !d.includes('副底')) {
+                            rawFu += parseInt(m[1]);
+                        }
+                    });
+
+                    // Add Ron Fu
+                    rawFu += 10;
+                    fuDetails.push(`門前ロン 10符`);
+
+                    // Round up
+                    result.fu = Math.ceil(rawFu / 10) * 10;
+                    if (result.fu === 20) result.fu = 30; // Min 30 for Ron
+                } else {
+                    // Chiitoitsu Ron
+                    fuDetails.push(`七対子 25符`);
+                }
+            }
+        } else {
+            // Normal Ron
+            if (!isYakuman) fuDetails.push(`門前ロン 10符`);
+        }
     }
 
-    // Handle Kiriage Mangan (30fu 4han -> 8000/12000 instead of 7700/11600)
-    // riichi lib might return 7700 for 30fu 4han.
+    // Final Point Recalculation
+    const isOya = wind === 'East';
+    if (isYakuman) {
+        // Use result.ten as is for Yakuman
+    } else {
+        // Non-Yakuman
+        // Always recalculate to ensure consistency with Han/Fu
+        result.ten = calculatePoints(result.han, result.fu, isOya, isTsumo);
+    }
+
+    // Re-construct text
+    const yakuText = isYakuman ? (result.text.match(/役満|ダブル役満/) ? result.text.match(/役満|ダブル役満/)[0] : '役満') : `${result.fu}符${result.han}飜`;
+    const winType = isTsumo ? '自摸' : 'ロン';
+    result.text = `(${roundWind}場${seat === 1 ? '東' : seat === 2 ? '南' : seat === 3 ? '西' : '北'}家)${winType} ${yakuText} ${result.ten}点`;
+
+    // Handle Kiriage Mangan
     if (settings?.kiriageMangan) {
         if (result.fu === 30 && result.han === 4) {
-            // Check if it's not already mangan (some rules might differ)
-            // Usually 30fu 4han is 7700 (Ron) or 7900 (Tsumo 2000/3900 -> 2000/4000?)
-            // Kiriage Mangan rounds this up to Mangan (8000 / 4000/2000)
-            // We can just override the text or points if we detect this specific case.
-            // For simplicity, let's just mark it in text for now or adjust points if needed.
-            // Note: riichi lib points might be complex object or number.
-            // If points is close to 7700, bump to 8000.
             if (result.ten >= 7700 && result.ten < 8000) {
                 result.ten = 8000;
-                result.text = result.text.replace(/\d+点/, '8000点'); // Simple replacement
+                result.text = result.text.replace(/\d+点/, '8000点');
             }
         }
-        // 60fu 3han is equivalent to 30fu 4han
         if (result.fu === 60 && result.han === 3) {
             if (result.ten >= 7700 && result.ten < 8000) {
                 result.ten = 8000;
@@ -187,4 +338,31 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
         fuDetails: fuDetails,
         text: result.text
     };
+};
+
+const calculatePoints = (han: number, fu: number, isOya: boolean, isTsumo: boolean): number => {
+    let basic = fu * Math.pow(2, 2 + han);
+
+    // Limit check
+    if (basic >= 2000 || han >= 5) {
+        if (han >= 13) basic = 8000; // Yakuman
+        else if (han >= 11) basic = 6000; // Sanbaiman
+        else if (han >= 8) basic = 4000; // Baiman
+        else if (han >= 6) basic = 3000; // Haneman
+        else basic = 2000; // Mangan
+    }
+
+    if (isTsumo) {
+        const payOya = Math.ceil((basic * 2) / 100) * 100;
+        const payKo = Math.ceil(basic / 100) * 100;
+        if (isOya) {
+            return payOya * 3; // All pay Oya
+        } else {
+            return payOya + payKo * 2;
+        }
+    } else {
+        // Ron
+        const multiplier = isOya ? 6 : 4;
+        return Math.ceil((basic * multiplier) / 100) * 100;
+    }
 };
