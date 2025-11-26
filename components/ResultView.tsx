@@ -36,7 +36,17 @@ const ResultView: React.FC<ResultViewProps> = ({ userResult, actualResult, onNex
                         <div className="text-xs text-pink-400 font-bold uppercase">Points</div>
                         <div className="font-black text-xl text-gray-800">
                             {(() => {
-                                // Try to extract Tsumo breakdown from text
+                                // Use explicit score breakdown if available
+                                if (actualResult.scoreBreakdown) {
+                                    if (actualResult.scoreBreakdown.tsumoKo && actualResult.scoreBreakdown.tsumoOya) {
+                                        return <span className="text-lg">{actualResult.scoreBreakdown.tsumoKo}-{actualResult.scoreBreakdown.tsumoOya}</span>;
+                                    }
+                                    if (actualResult.scoreBreakdown.tsumoOya) {
+                                        return <span className="text-lg">{actualResult.scoreBreakdown.tsumoOya} all</span>;
+                                    }
+                                }
+
+                                // Fallback to parsing text (legacy support)
                                 const tsumoMatch = actualResult.text.match(/(\d+)\/(\d+)/);
                                 if (tsumoMatch) {
                                     return <span className="text-lg">{tsumoMatch[1]}-{tsumoMatch[2]}</span>;

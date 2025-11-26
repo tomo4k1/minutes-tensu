@@ -32,12 +32,31 @@ const HandDisplay: React.FC<HandDisplayProps> = ({ hand }) => {
             </div>
 
             {/* Tiles */}
-            <div className="text-white text-6xl font-serif tracking-widest drop-shadow-md flex justify-center flex-wrap mt-4 mb-2 relative z-0">
-                {tileObjects.map((t, i) => (
-                    <span key={i} className={`transform transition-transform hover:-translate-y-1 ${t.isRed ? 'text-red-500 filter drop-shadow-sm' : ''}`}>
-                        {t.char}
-                    </span>
-                ))}
+            {/* Tiles */}
+            <div className="text-white text-6xl font-serif tracking-widest drop-shadow-md flex justify-center flex-wrap mt-4 mb-2 relative z-0 items-end gap-4">
+                {/* Closed Hand */}
+                <div className="flex flex-wrap justify-center">
+                    {tileObjects.map((t, i) => (
+                        <span key={i} className={`transform transition-transform hover:-translate-y-1 ${t.isRed ? 'text-red-500 filter drop-shadow-sm' : ''}`}>
+                            {t.char}
+                        </span>
+                    ))}
+                </div>
+
+                {/* Calls (Open Sets) */}
+                {hand.calls && hand.calls.length > 0 && (
+                    <div className="flex gap-2 opacity-90">
+                        {hand.calls.map((call, i) => (
+                            <div key={i} className="flex bg-black/10 rounded px-1">
+                                {handToTileObjects(call).map((t, j) => (
+                                    <span key={j} className={`transform ${t.isRed ? 'text-red-500 filter drop-shadow-sm' : ''}`}>
+                                        {t.char}
+                                    </span>
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Info Footer */}

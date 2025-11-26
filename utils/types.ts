@@ -15,4 +15,9 @@ export interface ScoreResult {
     yaku: Record<string, string>;
     fuDetails: string[];
     text: string;
+    error?: boolean;
+    scoreBreakdown?: {
+        tsumoKo?: number;
+        tsumoOya?: number;
+    };
 }

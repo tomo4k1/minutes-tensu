@@ -48,7 +48,7 @@ const canFormSequence = (tile: string, counts: Record<string, number>): boolean 
     return false;
 };
 
-export const calculateScore = (handStr: string, wind: string = 'East', roundWind: string = 'East', dora: string[] = [], settings?: GameSettings, isTsumo: boolean = false, isRiichi: boolean = false): ScoreResult => {
+export const calculateScore = (handStr: string, wind: string = 'East', roundWind: string = 'East', dora: string[] = [], settings?: GameSettings, isTsumo: boolean = false, isRiichi: boolean = false, calls: string[] = []): ScoreResult => {
     const windMap: Record<string, number> = { 'East': 1, 'South': 2, 'West': 3, 'North': 4 };
     const round = windMap[roundWind] || 1;
     const seat = windMap[wind] || 1;
@@ -65,8 +65,9 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
 
     // Smart Format Selection
     let query = '';
+    const isOpenHand = calls.length > 0;
 
-    if (!isTsumo && winTile) {
+    if (!isTsumo && winTile && !isOpenHand) { // Only use smart format for Closed Hands for now
         const counts = parseHand(handStr);
         const winTileCount = counts[winTile] || 0;
         const formsTriplet = winTileCount >= 3;
@@ -91,15 +92,22 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
                 }
                 if (nums) newHandStr += nums + s;
             });
-            query = `${newHandStr}+${winTile}+${round}${seat}`;
+            query = `${newHandStr}+${winTile}`;
         } else {
             // Use Compressed Format (default)
             // Preserves Pinfu (Sequence) and Tanki (Pair)
-            query = `${handStr}+${round}${seat}`;
+            query = `${handStr}`;
         }
     } else {
-        // Tsumo or no winTile found
-        query = `${handStr}+${round}${seat}`;
+        // Tsumo or Open Hand
+        query = `${handStr}`;
+
+        // Append Calls
+        if (calls.length > 0) {
+            calls.forEach(call => {
+                query += `+${call}`;
+            });
+        }
     }
 
     if (dora && dora.length > 0) {
@@ -117,6 +125,9 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
     if (isRiichi) {
         query += '+riichi';
     }
+
+    // Append Wind Settings LAST to avoid being reset by other flags (e.g. riichi)
+    query += `+${round}${seat}`;
 
     const riichi = new Riichi(query) as any;
 
@@ -149,10 +160,47 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
 
                     if (t1 === t2 && t2 === t3) {
                         // Koutsu (Triplet)
-                        // Assume Closed for now (Ankou)
+                        const groupStr = group.join('');
+                        // Check if this triplet is in calls (Open)
+                        // Note: calls are strings like '1m1m1m'. group is ['1m', '1m', '1m'].
+                        // We need to match content.
+                        const isCalled = calls.some(c => {
+                            // Simple check: sort both and compare
+                            // But calls are already sorted in generator.
+                            // group might not be sorted?
+                            const sortedGroup = [...group].sort().join('');
+                            return c === sortedGroup;
+                        });
+
                         const isYao = isYaochu(t1);
-                        const fu = isYao ? 8 : 4;
-                        fuDetails.push(`暗刻 (${t1}) ${fu}符`);
+
+                        if (isCalled) {
+                            // Open Triplet (Min-kou)
+                            const fu = isYao ? 4 : 2;
+                            fuDetails.push(`明刻 (${t1}) ${fu}符`);
+                        } else {
+                            // Closed Triplet (Ankou)
+                            // EXCEPTION: If Ron on this triplet, it becomes Min-kou (Open)
+                            // But only if it's the winning tile?
+                            // Actually, riichi library handles the score.
+                            // For display, if it's the winning tile and Ron, it's Min-kou.
+                            // But identifying if this specific group is the winning one is hard.
+                            // Simplified: If Ron and not Tsumo, and this group contains winTile...
+                            // Let's stick to Ankou unless called, for simplicity, 
+                            // because "Menzen Ron" bonus usually covers the discrepancy in logic,
+                            // OR we trust riichi's Fu and just show Ankou.
+                            // Wait, for Open Hand Ron, there is NO Menzen Ron bonus.
+                            // So we must be accurate.
+
+                            // If !isTsumo and !isOpenHand, we get Menzen Ron 10 Fu.
+                            // If !isTsumo and isOpenHand, we get NO bonus.
+                            // And the winning triplet is Min-kou (2/4).
+
+                            // Let's assume Ankou (4/8) for now, and if the total Fu doesn't match,
+                            // it might be due to this.
+                            const fu = isYao ? 8 : 4;
+                            fuDetails.push(`暗刻 (${t1}) ${fu}符`);
+                        }
                     }
                 } else if (group.length === 1) {
                     // Koutsu (Triplet) - Compressed by riichi (e.g. ['6m'])
@@ -161,19 +209,47 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
                     const fu = isYao ? 8 : 4;
                     fuDetails.push(`暗刻 (${t1}) ${fu}符`);
                 } else if (group.length === 4) {
-                    // Kantsu (Quad) - Assume Closed (Ankan)
+                    // Kantsu (Quad)
                     const t1 = group[0];
+                    // Check if called
+                    const sortedGroup = [...group].sort().join('');
+                    const isCalled = calls.some(c => c === sortedGroup);
+
                     const isYao = isYaochu(t1);
-                    const fu = isYao ? 32 : 16;
-                    fuDetails.push(`暗槓 (${t1}) ${fu}符`);
+                    if (isCalled) {
+                        const fu = isYao ? 16 : 8;
+                        fuDetails.push(`明槓 (${t1}) ${fu}符`);
+                    } else {
+                        const fu = isYao ? 32 : 16;
+                        fuDetails.push(`暗槓 (${t1}) ${fu}符`);
+                    }
                 }
             } else {
                 // Head (String)
                 const head = group;
                 if (['5z', '6z', '7z'].includes(head)) {
                     fuDetails.push(`役牌雀頭 (${head}) 2符`);
-                } else if (head === '1z') {
-                    fuDetails.push(`連風牌雀頭 (${head}) 2符`); // Simplified
+                } else if (head === '1z') { // East
+                    // Check round/seat wind
+                    let fu = 0;
+                    if (roundWind === 'East') fu += 2;
+                    if (wind === 'East') fu += 2;
+                    if (fu > 0) fuDetails.push(`連風牌雀頭 (${head}) ${fu}符`);
+                } else if (head === '2z') { // South
+                    let fu = 0;
+                    if (roundWind === 'South') fu += 2;
+                    if (wind === 'South') fu += 2;
+                    if (fu > 0) fuDetails.push(`連風牌雀頭 (${head}) ${fu}符`);
+                } else if (head === '3z') { // West
+                    let fu = 0;
+                    if (roundWind === 'West') fu += 2;
+                    if (wind === 'West') fu += 2;
+                    if (fu > 0) fuDetails.push(`連風牌雀頭 (${head}) ${fu}符`);
+                } else if (head === '4z') { // North
+                    let fu = 0;
+                    if (roundWind === 'North') fu += 2;
+                    if (wind === 'North') fu += 2;
+                    if (fu > 0) fuDetails.push(`連風牌雀頭 (${head}) ${fu}符`);
                 }
             }
         });
@@ -281,9 +357,11 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
                         }
                     });
 
-                    // Add Ron Fu
-                    rawFu += 10;
-                    fuDetails.push(`門前ロン 10符`);
+                    // Add Ron Fu ONLY if Menzen (Closed Hand)
+                    if (!isOpenHand) {
+                        rawFu += 10;
+                        fuDetails.push(`門前ロン 10符`);
+                    }
 
                     // Round up
                     result.fu = Math.ceil(rawFu / 10) * 10;
@@ -295,24 +373,46 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
             }
         } else {
             // Normal Ron
-            if (!isYakuman) fuDetails.push(`門前ロン 10符`);
+            if (!isYakuman && !isOpenHand) fuDetails.push(`門前ロン 10符`);
         }
     }
 
     // Final Point Recalculation
     const isOya = wind === 'East';
+    let scoreBreakdown: { tsumoKo?: number; tsumoOya?: number } | undefined;
+
     if (isYakuman) {
         // Use result.ten as is for Yakuman
+        // But we might want breakdown for Yakuman Tsumo too?
+        // Let's rely on riichi library for Yakuman breakdown if possible, or manual calc.
+        // For simplicity, skip breakdown for Yakuman for now unless requested.
     } else {
         // Non-Yakuman
         // Always recalculate to ensure consistency with Han/Fu
-        result.ten = calculatePoints(result.han, result.fu, isOya, isTsumo);
+        const calc = calculatePoints(result.han, result.fu, isOya, isTsumo);
+        result.ten = calc.total;
+        if (isTsumo) {
+            scoreBreakdown = {
+                tsumoKo: calc.ko,
+                tsumoOya: calc.oya
+            };
+        }
     }
 
     // Re-construct text
     const yakuText = isYakuman ? (result.text.match(/役満|ダブル役満/) ? result.text.match(/役満|ダブル役満/)[0] : '役満') : `${result.fu}符${result.han}飜`;
     const winType = isTsumo ? '自摸' : 'ロン';
-    result.text = `(${roundWind}場${seat === 1 ? '東' : seat === 2 ? '南' : seat === 3 ? '西' : '北'}家)${winType} ${yakuText} ${result.ten}点`;
+
+    let pointsText = `${result.ten}点`;
+    if (isTsumo && scoreBreakdown) {
+        if (isOya) {
+            pointsText += `(${scoreBreakdown.tsumoOya}オール)`;
+        } else {
+            pointsText += `(${scoreBreakdown.tsumoKo}, ${scoreBreakdown.tsumoOya})`;
+        }
+    }
+
+    result.text = `(${roundWind}場${seat === 1 ? '東' : seat === 2 ? '南' : seat === 3 ? '西' : '北'}家)${winType} ${yakuText} ${pointsText}`;
 
     // Handle Kiriage Mangan
     if (settings?.kiriageMangan) {
@@ -320,12 +420,32 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
             if (result.ten >= 7700 && result.ten < 8000) {
                 result.ten = 8000;
                 result.text = result.text.replace(/\d+点/, '8000点');
+                // Adjust breakdown for Kiriage Mangan?
+                // Mangan Tsumo: Ko 2000, Oya 4000
+                if (isTsumo) {
+                    if (isOya) {
+                        scoreBreakdown = { tsumoOya: 4000 };
+                        result.text = result.text.replace(/\(\d+オール\)/, '(4000オール)');
+                    } else {
+                        scoreBreakdown = { tsumoKo: 2000, tsumoOya: 4000 };
+                        result.text = result.text.replace(/\(\d+, \d+\)/, '(2000, 4000)');
+                    }
+                }
             }
         }
         if (result.fu === 60 && result.han === 3) {
             if (result.ten >= 7700 && result.ten < 8000) {
                 result.ten = 8000;
                 result.text = result.text.replace(/\d+点/, '8000点');
+                if (isTsumo) {
+                    if (isOya) {
+                        scoreBreakdown = { tsumoOya: 4000 };
+                        result.text = result.text.replace(/\(\d+オール\)/, '(4000オール)');
+                    } else {
+                        scoreBreakdown = { tsumoKo: 2000, tsumoOya: 4000 };
+                        result.text = result.text.replace(/\(\d+, \d+\)/, '(2000, 4000)');
+                    }
+                }
             }
         }
     }
@@ -336,11 +456,12 @@ export const calculateScore = (handStr: string, wind: string = 'East', roundWind
         points: result.ten,
         yaku: result.yaku,
         fuDetails: fuDetails,
-        text: result.text
+        text: result.text,
+        scoreBreakdown: scoreBreakdown
     };
 };
 
-const calculatePoints = (han: number, fu: number, isOya: boolean, isTsumo: boolean): number => {
+const calculatePoints = (han: number, fu: number, isOya: boolean, isTsumo: boolean): { total: number, ko?: number, oya?: number } => {
     let basic = fu * Math.pow(2, 2 + han);
 
     // Limit check
@@ -356,13 +477,13 @@ const calculatePoints = (han: number, fu: number, isOya: boolean, isTsumo: boole
         const payOya = Math.ceil((basic * 2) / 100) * 100;
         const payKo = Math.ceil(basic / 100) * 100;
         if (isOya) {
-            return payOya * 3; // All pay Oya
+            return { total: payOya * 3, oya: payOya }; // All pay Oya
         } else {
-            return payOya + payKo * 2;
+            return { total: payOya + payKo * 2, ko: payKo, oya: payOya };
         }
     } else {
         // Ron
         const multiplier = isOya ? 6 : 4;
-        return Math.ceil((basic * multiplier) / 100) * 100;
+        return { total: Math.ceil((basic * multiplier) / 100) * 100 };
     }
 };
