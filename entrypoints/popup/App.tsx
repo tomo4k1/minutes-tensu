@@ -14,29 +14,51 @@ function App() {
   const [settings, setSettings] = useState<GameSettings>(defaultSettings);
 
   const loadNewHand = async () => {
-    const newHand = generateRandomHand(settings);
+    let attempts = 0;
+    while (attempts < 10) {
+      attempts++;
+      const newHand = generateRandomHand(settings);
 
-    // If Ron, verify it has Yaku. If not, force Tsumo.
-    // If Ron, verify it has Yaku. If not, force Tsumo.
-    if (!newHand.isTsumo) {
       try {
         const { calculateScore } = await import('@/utils/scoring');
-        const result = calculateScore(newHand.tiles, newHand.wind, newHand.roundWind, newHand.dora, settings, false, newHand.isRiichi);
+        // Force Tsumo if Ron has no Yaku (handled inside loop logic below)
 
-        // Check if there are any Yaku EXCLUDING Dora/Red Dora/Ura Dora
+        // Calculate score to check validity
+        const result = calculateScore(newHand.tiles, newHand.wind, newHand.roundWind, newHand.dora, settings, newHand.isTsumo, newHand.isRiichi, newHand.calls);
+
+        // If Ron and no Yaku (excluding Dora), try to force Tsumo or regenerate
         const yakuKeys = Object.keys(result.yaku);
         const validYaku = yakuKeys.filter(y => !['ドラ', '赤ドラ', '裏ドラ'].includes(y));
 
-        if (validYaku.length === 0) throw new Error('No Yaku (only Dora)');
+        if (!newHand.isTsumo && validYaku.length === 0) {
+          // Try converting to Tsumo
+          newHand.isTsumo = true;
+          const tsumoResult = calculateScore(newHand.tiles, newHand.wind, newHand.roundWind, newHand.dora, settings, true, newHand.isRiichi, newHand.calls);
+          if (tsumoResult.han > 0 && !tsumoResult.error) {
+            // Tsumo worked
+            setHand(newHand);
+            setUserResult(null);
+            setActualResult(null);
+            return;
+          }
+        } else if (result.han > 0 && !result.error) {
+          // Valid hand
+          setHand(newHand);
+          setUserResult(null);
+          setActualResult(null);
+          return;
+        }
+
+        // If we get here, hand is invalid (0 Han or Error). Retry.
+        console.log('Generated invalid hand (0 Han or Error), retrying...', result);
       } catch (e) {
-        console.log('Ron invalid (No Yaku), forcing Tsumo');
-        newHand.isTsumo = true;
+        console.error('Error checking hand validity:', e);
       }
     }
-
-    setHand(newHand);
-    setUserResult(null);
-    setActualResult(null);
+    console.error('Failed to generate valid hand after 10 attempts');
+    // Fallback: show whatever we have to avoid infinite loop, or show error
+    // For now, just show the last generated hand (which might be 0 score)
+    // But ideally we should alert.
   };
 
   useEffect(() => {
@@ -64,7 +86,7 @@ function App() {
     try {
       // Lazy load scoring logic to improve startup time
       const { calculateScore } = await import('@/utils/scoring');
-      const result = calculateScore(hand.tiles, hand.wind, hand.roundWind, hand.dora, settings, hand.isTsumo, hand.isRiichi);
+      const result = calculateScore(hand.tiles, hand.wind, hand.roundWind, hand.dora, settings, hand.isTsumo, hand.isRiichi, hand.calls);
       setActualResult(result);
       setUserResult({ han, fu, points });
     } catch (e: any) {

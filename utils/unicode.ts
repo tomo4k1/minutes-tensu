@@ -76,7 +76,7 @@ export const handToTileObjects = (handStr: string): TileObject[] => {
                     codePoint = base + (effectiveNum - 1);
                 }
                 result.push({
-                    char: String.fromCodePoint(codePoint),
+                    char: String.fromCodePoint(codePoint) + '\uFE0E',
                     isRed
                 });
             }

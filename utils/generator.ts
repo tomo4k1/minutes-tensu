@@ -47,6 +47,8 @@ export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
     const deck = new Deck();
     const handTiles: string[] = [];
 
+    const sets: string[][] = [];
+
     // 1. Generate 4 Sets (Mentsu)
     for (let i = 0; i < 4; i++) {
         let added = false;
@@ -63,7 +65,7 @@ export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
 
                 // Need 3 of this tile
                 if (deck.tryTake([tile, tile, tile])) {
-                    handTiles.push(tile, tile, tile);
+                    sets.push([tile, tile, tile]);
                     added = true;
                 }
             } else {
@@ -75,7 +77,7 @@ export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
                 const t3 = `${startNum + 2}${suit}`;
 
                 if (deck.tryTake([t1, t2, t3])) {
-                    handTiles.push(t1, t2, t3);
+                    sets.push([t1, t2, t3]);
                     added = true;
                 }
             }
@@ -83,18 +85,53 @@ export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
     }
 
     // 2. Generate Pair (Jantou)
+    let pair: string[] = [];
     let pairAdded = false;
     while (!pairAdded) {
         const available = deck.getAvailableTiles();
         const tile = available[randomInt(available.length)];
         if (deck.tryTake([tile, tile])) {
-            handTiles.push(tile, tile);
+            pair = [tile, tile];
             pairAdded = true;
         }
     }
 
-    // 3. Convert to Riichi String Format
-    // Pick a winning tile (agari-hai) randomly from the hand
+    // 3. Naki (Open Hand) Logic
+    const isOpenHand = Math.random() < 0.3; // 30% chance to be open
+    const calls: string[] = [];
+    let isRiichi = false;
+
+    if (isOpenHand) {
+        // Decide how many sets to open (1 to 4, usually 1 or 2)
+        const numOpen = randomInt(2) + 1; // 1 or 2 sets open
+
+        // Shuffle indices 0-3
+        const indices = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+        const openIndices = indices.slice(0, numOpen);
+
+        openIndices.forEach(idx => {
+            const set = sets[idx];
+            // Format call string: e.g. "1m1m1m" -> "111m", "2p3p4p" -> "234p"
+            // Sort set for consistency
+            set.sort();
+
+            // Compress to short format for riichi library
+            const suit = set[0].slice(-1);
+            const nums = set.map(t => t.slice(0, -1)).join('');
+            calls.push(nums + suit);
+
+            // Mark as null or remove? We need to exclude from handTiles.
+            sets[idx] = []; // Empty it
+        });
+    } else {
+        // Closed Hand
+        isRiichi = Math.random() < 0.5;
+    }
+
+    // 4. Assemble Hand Tiles (Closed Part)
+    sets.forEach(s => handTiles.push(...s));
+    handTiles.push(...pair);
+
     const winTileIndex = randomInt(handTiles.length);
     const winTile = handTiles[winTileIndex];
 
@@ -120,19 +157,20 @@ export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
     const finalTiles = [...remainingTiles, winTile];
 
     // Handle Red Dora (Aka Dora)
-    // If enabled, replace '5' with '0' with some probability (e.g. 25% per 5)
-    // Actually, usually there is only 1 red 5 per suit (2 for 5p sometimes).
-    // Let's simplify: if akaDora is on, try to make one 5 red per suit if present.
     if (settings?.akaDora) {
         const suits = ['m', 'p', 's'];
         suits.forEach(suit => {
-            // Find all 5s of this suit
+            // Find all 5s of this suit in CLOSED tiles
             const indices = finalTiles.map((t, i) => t === `5${suit}` ? i : -1).filter(i => i !== -1);
             if (indices.length > 0) {
-                // Pick one to be red
                 const targetIndex = indices[randomInt(indices.length)];
                 finalTiles[targetIndex] = `0${suit}`;
             }
+
+            // Also check CALLS for Red Dora
+            // This is trickier because calls are strings.
+            // Let's simplify: Only apply Red Dora to closed tiles for now.
+            // Applying to calls requires parsing and rebuilding the call string.
         });
     }
 
@@ -157,17 +195,10 @@ export const generateRandomHand = (settings?: GameSettings): MahjongHand => {
     }
     resultStr += currentNums + currentSuit;
 
-    // 4. Randomize Conditions
+    // 6. Randomize Conditions
     const winds = ['East', 'South', 'West', 'North'] as const;
     const roundWinds = ['East', 'South'] as const;
     const isTsumo = Math.random() > 0.5;
-
-    // Riichi Logic
-    // 50% chance to be Riichi (for testing visibility)
-    // We will implement Open Hands (Naki) properly later.
-    // For now, all hands are Closed.
-    const isRiichi = Math.random() < 0.5;
-    const calls: string[] = [];
 
     // Random Dora (1 indicator)
     const allTiles = [];
