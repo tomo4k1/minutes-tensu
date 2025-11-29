@@ -5,6 +5,9 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
+    name: 'Mahjong Tensu Helper',
+    description: 'A helper extension for Mahjong score calculation and practice.',
+    version: '1.0.0',
     permissions: ['storage'],
   },
   vite: () => ({
